@@ -1,12 +1,12 @@
-name: Auto bump & tag on merge to master
+name: Auto bump & tag on merge to main
 
 on:
   pull_request:
     types: [closed]
-    branches: [master]
+    branches: [main]
 
 concurrency:
-  group: tag-master
+  group: tag-main
   cancel-in-progress: false
 
 jobs:
