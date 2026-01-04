@@ -1,0 +1,89 @@
+name: Auto bump & tag on merge to master
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [master]
+
+concurrency:
+  group: tag-master
+  cancel-in-progress: false
+
+jobs:
+  tag:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout merge commit
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
+
+      - name: Compute next semver tag from PR labels
+        id: next
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --tags
+
+          # Decide bump level (priority: major > minor > patch). Default: patch.
+          LABELS_JSON='${{ toJson(github.event.pull_request.labels) }}'
+          BUMP="patch"
+          echo "$LABELS_JSON" | grep -q '"name":"release:major"' && BUMP="major"
+          if [[ "$BUMP" != "major" ]]; then
+            echo "$LABELS_JSON" | grep -q '"name":"release:minor"' && BUMP="minor"
+          fi
+          if [[ "$BUMP" != "major" && "$BUMP" != "minor" ]]; then
+            echo "$LABELS_JSON" | grep -q '"name":"release:patch"' && BUMP="patch"
+          fi
+
+          # Latest tag (vX.Y.Z). If none, start from v0.0.0 then bump.
+          LATEST="$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -n 1 || true)"
+          if [[ -z "$LATEST" ]]; then
+            MAJOR=0; MINOR=0; PATCH=0
+          else
+            VER="${LATEST#v}"
+            IFS='.' read -r MAJOR MINOR PATCH <<< "$VER"
+          fi
+
+          case "$BUMP" in
+            major) MAJOR=$((MAJOR+1)); MINOR=0; PATCH=0;;
+            minor) MINOR=$((MINOR+1)); PATCH=0;;
+            patch) PATCH=$((PATCH+1));;
+            *) echo "Unknown bump: $BUMP" >&2; exit 1;;
+          esac
+
+          TAG="v${MAJOR}.${MINOR}.${PATCH}"
+
+          # Defensive: tag must not exist already
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "Tag already exists: $TAG" >&2
+            exit 1
+          fi
+
+          echo "bump=$BUMP" >> "$GITHUB_OUTPUT"
+          echo "latest=$LATEST" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Create and push annotated tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          git tag -a "${{ steps.next.outputs.tag }}" -m "Release ${{ steps.next.outputs.tag }}"
+          git push origin "${{ steps.next.outputs.tag }}"
+
+      - name: Create GitHub Release
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release create "${{ steps.next.outputs.tag }}" \
+            --title "${{ steps.next.outputs.tag }}" \
+            --generate-notes
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
