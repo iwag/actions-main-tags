@@ -34,11 +34,11 @@ jobs:
           # Decide bump level (priority: major > minor > patch). Default: patch.
           LABELS_JSON='${{ toJson(github.event.pull_request.labels) }}'
           BUMP="patch"
-          if echo "$LABELS_JSON" | grep -q '"name":"release:major"'; then
+          if echo "$LABELS_JSON" | grep -q '"name":\s*"release:major"'; then
             BUMP="major"
-          elif echo "$LABELS_JSON" | grep -q '"name":"release:minor"'; then
+          elif echo "$LABELS_JSON" | grep -q '"name":\s*"release:minor"'; then
             BUMP="minor"
-          elif echo "$LABELS_JSON" | grep -q '"name":"release:patch"'; then
+          elif echo "$LABELS_JSON" | grep -q '"name":\s*"release:patch"'; then
             BUMP="patch"
           fi
           echo "📋 Detected bump level: $BUMP"
