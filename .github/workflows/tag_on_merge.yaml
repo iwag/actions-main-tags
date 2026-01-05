@@ -34,19 +34,22 @@ jobs:
           # Decide bump level (priority: major > minor > patch). Default: patch.
           LABELS_JSON='${{ toJson(github.event.pull_request.labels) }}'
           BUMP="patch"
-          echo "$LABELS_JSON" | grep -q '"name":"release:major"' && BUMP="major"
-          if [[ "$BUMP" != "major" ]]; then
-            echo "$LABELS_JSON" | grep -q '"name":"release:minor"' && BUMP="minor"
+          if echo "$LABELS_JSON" | grep -q '"name":"release:major"'; then
+            BUMP="major"
+          elif echo "$LABELS_JSON" | grep -q '"name":"release:minor"'; then
+            BUMP="minor"
+          elif echo "$LABELS_JSON" | grep -q '"name":"release:patch"'; then
+            BUMP="patch"
           fi
-          if [[ "$BUMP" != "major" && "$BUMP" != "minor" ]]; then
-            echo "$LABELS_JSON" | grep -q '"name":"release:patch"' && BUMP="patch"
-          fi
+          echo "📋 Detected bump level: $BUMP"
 
           # Latest tag (vX.Y.Z). If none, start from v0.0.0 then bump.
           LATEST="$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -n 1 || true)"
           if [[ -z "$LATEST" ]]; then
+            echo "📦 No existing tags found, starting from v0.0.0"
             MAJOR=0; MINOR=0; PATCH=0
           else
+            echo "📦 Latest tag: $LATEST"
             VER="${LATEST#v}"
             IFS='.' read -r MAJOR MINOR PATCH <<< "$VER"
           fi
@@ -55,17 +58,18 @@ jobs:
             major) MAJOR=$((MAJOR+1)); MINOR=0; PATCH=0;;
             minor) MINOR=$((MINOR+1)); PATCH=0;;
             patch) PATCH=$((PATCH+1));;
-            *) echo "Unknown bump: $BUMP" >&2; exit 1;;
+            *) echo "❌ Unknown bump: $BUMP" >&2; exit 1;;
           esac
 
           TAG="v${MAJOR}.${MINOR}.${PATCH}"
 
           # Defensive: tag must not exist already
           if git rev-parse "$TAG" >/dev/null 2>&1; then
-            echo "Tag already exists: $TAG" >&2
+            echo "❌ Tag already exists: $TAG" >&2
             exit 1
           fi
 
+          echo "✅ Next tag: $TAG"
           echo "bump=$BUMP" >> "$GITHUB_OUTPUT"
           echo "latest=$LATEST" >> "$GITHUB_OUTPUT"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
@@ -77,7 +81,9 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git tag -a "${{ steps.next.outputs.tag }}" -m "Release ${{ steps.next.outputs.tag }}"
+          echo "🏷️  Created tag: ${{ steps.next.outputs.tag }}"
           git push origin "${{ steps.next.outputs.tag }}"
+          echo "✅ Pushed tag to origin"
 
       - name: Create GitHub Release
         shell: bash
@@ -86,6 +92,21 @@ jobs:
           gh release create "${{ steps.next.outputs.tag }}" \
             --title "${{ steps.next.outputs.tag }}" \
             --generate-notes
+          echo "🎉 Created release: ${{ steps.next.outputs.tag }}"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Summary
+        shell: bash
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<EOF
+          ## 🎉 Release Created
+
+          - **Tag**: \`${{ steps.next.outputs.tag }}\`
+          - **Bump**: \`${{ steps.next.outputs.bump }}\`
+          - **Previous**: \`${{ steps.next.outputs.latest || 'none' }}\`
+          - **PR**: #${{ github.event.pull_request.number }}
+
+          [View Release](https://github.com/${{ github.repository }}/releases/tag/${{ steps.next.outputs.tag }})
+          EOF
 
